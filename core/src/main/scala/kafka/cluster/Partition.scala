@@ -878,9 +878,11 @@ class Partition(val topicPartition: TopicPartition,
   private def maybeIncrementLeaderHW(leaderLog: Log, curTime: Long = time.milliseconds): Boolean = {
     // maybeIncrementLeaderHW is in the hot path, the following code is written to
     // avoid unnecessary collection generation
+    //leader副本的LEO位置
     var newHighWatermark = leaderLog.logEndOffsetMetadata
     remoteReplicasMap.values.foreach { replica =>
       // Note here we are using the "maximal", see explanation above
+      //如果follower副本的messageOffset小于leader副本的messageOffset，则HW为follower副本的logEndOffsetMetadata
       if (replica.logEndOffsetMetadata.messageOffset < newHighWatermark.messageOffset &&
         (curTime - replica.lastCaughtUpTimeMs <= replicaLagTimeMaxMs || isrState.maximalIsr.contains(replica.brokerId))) {
         newHighWatermark = replica.logEndOffsetMetadata

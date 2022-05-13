@@ -1211,13 +1211,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
+     * note consumer read msg 拉取数据
      * @throws KafkaException if the rebalance callback throws exception
      */
     private ConsumerRecords<K, V> poll(final Timer timer, final boolean includeMetadataInTimeout) {
         acquireAndEnsureOpen();
         try {
             this.kafkaConsumerMetrics.recordPollStart(timer.currentTimeMs());
-
+            //如果subscriptionType为NONE，表示没有订阅过topic
             if (this.subscriptions.hasNoSubscriptionOrUserAssignment()) {
                 throw new IllegalStateException("Consumer is not subscribed to any topics or assigned any partitions");
             }
@@ -1226,6 +1227,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 client.maybeTriggerWakeup();
 
                 if (includeMetadataInTimeout) {
+                    //尝试更新分配元数据但不需要阻塞加入组的时间
                     // try to update assignment metadata BUT do not need to block on the timer for join group
                     updateAssignmentMetadataIfNeeded(timer, false);
                 } else {
@@ -1258,6 +1260,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     boolean updateAssignmentMetadataIfNeeded(final Timer timer, final boolean waitForJoinGroup) {
+        //协调者不为空
         if (coordinator != null && !coordinator.poll(timer, waitForJoinGroup)) {
             return false;
         }

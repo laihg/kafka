@@ -456,14 +456,16 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     }
 
     /**
+     * 轮询协调器事件，确保协调器知道消费者已经加入到组里面。
      * Poll for coordinator events. This ensures that the coordinator is known and that the consumer
      * has joined the group (if it is using group management). This also handles periodic offset commits
      * if they are enabled.
      * <p>
+     * 如果超时到期或不需要等待重新加入，则提前返回
      * Returns early if the timeout expires or if waiting on rejoin is not required
      *
      * @param timer Timer bounding how long this method can block
-     * @param waitForJoinGroup Boolean flag indicating if we should wait until re-join group completes
+     * @param waitForJoinGroup Boolean flag indicating if we should wait until re-join group completes 是否需要等到重新加入组完成
      * @throws KafkaException if the rebalance callback throws an exception
      * @return true iff the operation succeeded
      */
@@ -472,14 +474,17 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         invokeCompletedOffsetCommitCallbacks();
 
+        //如果使用的是自动分配Partition，订阅Topic时默认为AUTO_TOPICS，所以为true
         if (subscriptions.hasAutoAssignedPartitions()) {
             if (protocol == null) {
                 throw new IllegalStateException("User configured " + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG +
                     " to empty while trying to subscribe for group protocol to auto assign partitions");
             }
+            //更新心跳时间
             // Always update the heartbeat last poll time so that the heartbeat thread does not leave the
             // group proactively due to application inactivity even if (say) the coordinator cannot be found.
             pollHeartbeat(timer.currentTimeMs());
+            //如果协调器节点为空或不可用且协议期可用但没有初始化完则返回false。
             if (coordinatorUnknown() && !ensureCoordinatorReady(timer)) {
                 return false;
             }
@@ -507,6 +512,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                     maybeUpdateSubscriptionMetadata();
                 }
 
+                //如果不等待加入consumer group，则把时间设置为0.
                 // if not wait for join group, we would just use a timer of 0
                 if (!ensureActiveGroup(waitForJoinGroup ? timer : time.timer(0L))) {
                     // since we may use a different timer in the callee, we'd still need
@@ -792,6 +798,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         if (!subscriptions.hasAutoAssignedPartitions())
             return false;
 
+        //如果执行了分配并且元数据发生了变化，需要重新加入
         // we need to rejoin if we performed the assignment and metadata has changed;
         // also for those owned-but-no-longer-existed partitions we should drop them as lost
         if (assignmentSnapshot != null && !assignmentSnapshot.matches(metadataSnapshot)) {
@@ -802,6 +809,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             return true;
         }
 
+        //如果订阅topic和上次不一致也需要重新加入。
         // we need to join if our subscription has changed since the last join
         if (joinedSubscription != null && !joinedSubscription.equals(subscriptions.subscription())) {
             log.info("Requesting to re-join the group and trigger rebalance since the subscription has changed from {} to {}",

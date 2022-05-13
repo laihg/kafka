@@ -35,17 +35,56 @@ import java.util.Set;
 public final class Cluster {
 
     private final boolean isBootstrapConfigured;
+    /**
+     * 集群中所有的broker节点
+     */
     private final List<Node> nodes;
+    /**
+     * 未认证的topic
+     */
     private final Set<String> unauthorizedTopics;
+    /**
+     * 无效的topic
+     */
     private final Set<String> invalidTopics;
+    /**
+     * 内部的topic
+     */
     private final Set<String> internalTopics;
+    /**
+     * broker controller 节点
+     */
     private final Node controller;
+    /**
+     * Topic分区信息
+     * key:Topic分区, value:分区详细信息
+     */
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
+    /**
+     * 每个Topic有哪些分区
+     * key:Topic名称, value:分区详细信息
+     */
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    /**
+     * Topic中可用的分区
+     * key:Topic名称, value:可用的分区详细信息
+     */
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
+    /**
+     * 每个broker下存放了哪些分区
+     * key:broker id, value:partition信息
+     */
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
+    /**
+     * broker id，对应的 broker节点
+     * key: broker id, value:broker节点
+     */
     private final Map<Integer, Node> nodesById;
     private final ClusterResource clusterResource;
+    /**
+     * topic id存储
+     * key:topic名称，value:唯一ID
+     */
     private final Map<String, Uuid> topicIds;
 
     /**
@@ -117,13 +156,16 @@ public final class Cluster {
                     Map<String, Uuid> topicIds) {
         this.isBootstrapConfigured = isBootstrapConfigured;
         this.clusterResource = new ClusterResource(clusterId);
+        //将原始的broker节点复制一份，避免被修改。
         // make a randomized, unmodifiable copy of the nodes
         List<Node> copy = new ArrayList<>(nodes);
         Collections.shuffle(copy);
         this.nodes = Collections.unmodifiableList(copy);
 
         // Index the nodes for quick lookup
+        //临时存放broker node节点
         Map<Integer, Node> tmpNodesById = new HashMap<>();
+        //临时存放broker下有哪些partition信息
         Map<Integer, List<PartitionInfo>> tmpPartitionsByNode = new HashMap<>(nodes.size());
         for (Node node : nodes) {
             tmpNodesById.put(node.id(), node);
@@ -131,6 +173,7 @@ public final class Cluster {
             // the partitions
             tmpPartitionsByNode.put(node.id(), new ArrayList<>());
         }
+        //broker node不可变
         this.nodesById = Collections.unmodifiableMap(tmpNodesById);
 
         // index the partition infos by topic, topic+partition, and node
@@ -139,18 +182,22 @@ public final class Cluster {
         Map<TopicPartition, PartitionInfo> tmpPartitionsByTopicPartition = new HashMap<>(partitions.size());
         Map<String, List<PartitionInfo>> tmpPartitionsByTopic = new HashMap<>();
         for (PartitionInfo p : partitions) {
+            //组装topic以及topic分区详细信息数据
             tmpPartitionsByTopicPartition.put(new TopicPartition(p.topic(), p.partition()), p);
+            //组装topic以及topic下有哪些分区数据
             tmpPartitionsByTopic.computeIfAbsent(p.topic(), topic -> new ArrayList<>()).add(p);
 
             // The leader may not be known
             if (p.leader() == null || p.leader().isEmpty())
                 continue;
 
+            //存放broker下有哪些分区数据
             // If it is known, its node information should be available
             List<PartitionInfo> partitionsForNode = Objects.requireNonNull(tmpPartitionsByNode.get(p.leader().id()));
             partitionsForNode.add(p);
         }
 
+        //将broker中的分区数据更新为不可变
         // Update the values of `tmpPartitionsByNode` to contain unmodifiable lists
         for (Map.Entry<Integer, List<PartitionInfo>> entry : tmpPartitionsByNode.entrySet()) {
             tmpPartitionsByNode.put(entry.getKey(), Collections.unmodifiableList(entry.getValue()));
@@ -160,10 +207,13 @@ public final class Cluster {
         // unmodifiable lists
         Map<String, List<PartitionInfo>> tmpAvailablePartitionsByTopic = new HashMap<>(tmpPartitionsByTopic.size());
         for (Map.Entry<String, List<PartitionInfo>> entry : tmpPartitionsByTopic.entrySet()) {
+            //将topic下分区数据更新为不可变
             String topic = entry.getKey();
             List<PartitionInfo> partitionsForTopic = Collections.unmodifiableList(entry.getValue());
             tmpPartitionsByTopic.put(topic, partitionsForTopic);
+
             // Optimise for the common case where all partitions are available
+            //查找是否存在leader为空的分区，过滤出topic下可用的分区
             boolean foundUnavailablePartition = partitionsForTopic.stream().anyMatch(p -> p.leader() == null);
             List<PartitionInfo> availablePartitionsForTopic;
             if (foundUnavailablePartition) {
@@ -200,6 +250,7 @@ public final class Cluster {
     }
 
     /**
+     * 根据给定的地址创建Cluster对象
      * Create a "bootstrap" cluster using the given list of host/ports
      * @param addresses The addresses
      * @return A cluster for these hosts/ports

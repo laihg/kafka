@@ -90,6 +90,9 @@ public class NetworkClient implements KafkaClient {
     /* the state of each node's connection */
     private final ClusterConnectionStates connectionStates;
 
+    /**
+     * 存放当前正在等待响应的请求
+     */
     /* the set of requests currently being sent or awaiting a response */
     private final InFlightRequests inFlightRequests;
 

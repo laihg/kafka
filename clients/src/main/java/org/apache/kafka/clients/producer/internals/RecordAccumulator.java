@@ -77,6 +77,10 @@ public final class RecordAccumulator {
     private final BufferPool free;
     private final Time time;
     private final ApiVersions apiVersions;
+    /**
+     * 核心，存放topic 分区要发送的数据，一个topic分区对应一个DQ队列，消息每次存放在DQ最后面
+     * key：topic分区信息，value: DQ队列存放的消息
+     */
     private final ConcurrentMap<TopicPartition, Deque<ProducerBatch>> batches;
     private final IncompleteBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
@@ -124,6 +128,7 @@ public final class RecordAccumulator {
         this.lingerMs = lingerMs;
         this.retryBackoffMs = retryBackoffMs;
         this.deliveryTimeoutMs = deliveryTimeoutMs;
+        //kafka自己实现的读写分离的Map结构
         this.batches = new CopyOnWriteMap<>();
         this.free = bufferPool;
         this.incomplete = new IncompleteBatches();
@@ -197,6 +202,7 @@ public final class RecordAccumulator {
             synchronized (dq) {
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
+                //第一次尝试添加到内存中
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq, nowMs);
                 if (appendResult != null)
                     return appendResult;
@@ -209,8 +215,10 @@ public final class RecordAccumulator {
             }
 
             byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
+            //batch.size默认为16kb，取batch.size和消息大小中的最大值，作为内存分配大小
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, tp.topic(), tp.partition(), maxTimeToBlock);
+            //分配缓存内存大小
             buffer = free.allocate(size, maxTimeToBlock);
 
             // Update the current time in case the buffer allocation blocked above.
@@ -220,26 +228,31 @@ public final class RecordAccumulator {
                 if (closed)
                     throw new KafkaException("Producer closed while send in progress");
 
+                //第二次尝试追加到内存中
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, headers, callback, dq, nowMs);
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
                     return appendResult;
                 }
 
+                //根据分配的内存大小，创建内存缓存器
                 MemoryRecordsBuilder recordsBuilder = recordsBuilder(buffer, maxUsableMagic);
+                //新增一个batch
                 ProducerBatch batch = new ProducerBatch(tp, recordsBuilder, nowMs);
+                //第三次尝试追加到内存中
                 FutureRecordMetadata future = Objects.requireNonNull(batch.tryAppend(timestamp, key, value, headers,
                         callback, nowMs));
-
+                //将batch添加到队列中
                 dq.addLast(batch);
                 incomplete.add(batch);
 
                 // Don't deallocate this buffer in the finally block as it's being used in the record batch
-                buffer = null;
+                buffer = null; //释放掉分配的缓存，help gc
                 return new RecordAppendResult(future, dq.size() > 1 || batch.isFull(), true, false);
             }
         } finally {
             if (buffer != null)
+                //释放内存
                 free.deallocate(buffer);
             appendsInProgress.decrementAndGet();
         }
@@ -263,12 +276,15 @@ public final class RecordAccumulator {
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers,
                                          Callback callback, Deque<ProducerBatch> deque, long nowMs) {
+        //topic第一次发送消息时，deque中没有元素，则返回空
         ProducerBatch last = deque.peekLast();
         if (last != null) {
+            //如果不等于空，则说明已经分配到batch，尝试追加到内存中
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, headers, callback, nowMs);
             if (future == null)
                 last.closeForRecordAppends();
             else
+                //返回存放内存结果
                 return new RecordAppendResult(future, deque.size() > 1 || last.isFull(), false, false);
         }
         return null;
@@ -420,6 +436,7 @@ public final class RecordAccumulator {
     }
 
     /**
+     * 发送消息之间的准备工作，获取broker leader节点</br>
      * Get a list of nodes whose partitions are ready to be sent, and the earliest time at which any non-sendable
      * partition will be ready; Also return the flag for whether there are any unknown leaders for the accumulated
      * partition batches.
@@ -445,33 +462,55 @@ public final class RecordAccumulator {
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         Set<String> unknownLeaderTopics = new HashSet<>();
 
+        //BufferPool中的queued(封装Lock.Condition对象，存在则说明内存不足)大于0，则说明内存不足
         boolean exhausted = this.free.queued() > 0;
+        //遍历batch对象
         for (Map.Entry<TopicPartition, Deque<ProducerBatch>> entry : this.batches.entrySet()) {
             Deque<ProducerBatch> deque = entry.getValue();
             synchronized (deque) {
                 // When producing to a large number of partitions, this path is hot and deques are often empty.
                 // We check whether a batch exists first to avoid the more expensive checks whenever possible.
+                //从队列中取第一个batch对象，这个对象是最早放入队列中的
                 ProducerBatch batch = deque.peekFirst();
                 if (batch != null) {
+                    //消息要发送的topic分区
                     TopicPartition part = entry.getKey();
+                    //从集群中获取broker leader节点
                     Node leader = cluster.leaderFor(part);
+                    //如果leader为空
                     if (leader == null) {
                         // This is a partition for which leader is not known, but messages are available to send.
                         // Note that entries are currently not removed from batches when deque is empty.
                         unknownLeaderTopics.add(part.topic());
                     } else if (!readyNodes.contains(leader) && !isMuted(part)) {
+                        //如果readyNodes中不包含broker leader节点 且muted中不包含该分区，正常是走此逻辑处理。
+
+                        //当前时间减去上一次发送batch的时间，假设一个batch没用发送过，则从当前时间减去这个batch创建出来的时间，这个batch
+                        //从创建开始到现在已经等待多久了。
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
+
+                        //如果重试次数大于0且batch等待的时间小于重试发送间隔时间，则取重试间隔时间，否则取lingerMs
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
+                        //从这个batch创建时间开始计算，最多等待多久就必须去发送，如果是在重试的阶段，但是是在非重试的初始阶段，则取lingerMs
+                        //lingerMs默认为0
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        //队列中存在batch元素或者batch已经满了
                         boolean full = deque.size() > 1 || batch.isFull();
+                        //是否已经过期，batch等待时间 >= batch最多只能等待的时间。如果lingerMs为0，则expired一定为0
                         boolean expired = waitedTimeMs >= timeToWaitMs;
+                        //事务是否已完成
                         boolean transactionCompleting = transactionManager != null && transactionManager.isCompleting();
+                        //以上条件满足一种则说明需发送消息
                         boolean sendable = full
+                            //batch是否已过期
                             || expired
+                            //资源是否耗尽
                             || exhausted
+                            //close标识当前客户端要关闭掉，此时就必须立刻把内存缓冲的Batch都发送出去
                             || closed
                             || flushInProgress()
                             || transactionCompleting;
+
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
                         } else {
@@ -542,6 +581,7 @@ public final class RecordAccumulator {
 
     private List<ProducerBatch> drainBatchesForOneNode(Cluster cluster, Node node, int maxSize, long now) {
         int size = 0;
+        //获取broker节点上所有的分区信息
         List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
         List<ProducerBatch> ready = new ArrayList<>();
         /* to make starvation less likely this loop doesn't start at 0 */
@@ -551,6 +591,7 @@ public final class RecordAccumulator {
             TopicPartition tp = new TopicPartition(part.topic(), part.partition());
             this.drainIndex = (this.drainIndex + 1) % parts.size();
 
+            //只针对不在请求中的topic进行处理
             // Only proceed if the partition has no in-flight batches.
             if (isMuted(tp))
                 continue;
@@ -618,6 +659,7 @@ public final class RecordAccumulator {
     }
 
     /**
+     * 根据broker节点组装要发送的batch，key：broker节点id，value：要发送的batch数据
      * Drain all the data for the given nodes and collate them into a list of batches that will fit within the specified
      * size on a per-node basis. This method attempts to avoid choosing the same topic-node over and over.
      *
@@ -651,6 +693,7 @@ public final class RecordAccumulator {
     }
 
     /**
+     * 根据topic分区获取dq队列，如果不存在batch中则创建一个dq队列，和这个分区进行映射
      * Get the deque for the given topic-partition, creating it if necessary.
      */
     private Deque<ProducerBatch> getOrCreateDeque(TopicPartition tp) {
@@ -658,6 +701,7 @@ public final class RecordAccumulator {
         if (d != null)
             return d;
         d = new ArrayDeque<>();
+        //将分区和队列存放到map中，这里可能会有高并发的情况，putIfAbsent()加了synchronized关键字，保证同一时间只有一个线程添加。
         Deque<ProducerBatch> previous = this.batches.putIfAbsent(tp, d);
         if (previous == null)
             return d;
@@ -672,6 +716,7 @@ public final class RecordAccumulator {
         incomplete.remove(batch);
         // Only deallocate the batch if it is not a split batch because split batch are allocated outside the
         // buffer pool.
+        //如果不是分割发送的batch消息，则将buffer归还到BufferPool中
         if (!batch.isSplitBatch())
             free.deallocate(batch.buffer(), batch.initialCapacity());
     }

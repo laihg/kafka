@@ -130,6 +130,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
         bufferStream.position(initialPosition + batchHeaderSizeInBytes);
         this.bufferStream = bufferStream;
+        //根据压缩类型选择使用哪种算法进行数据写入
         this.appendStream = new DataOutputStream(compressionType.wrapForOutput(this.bufferStream, magic));
     }
 

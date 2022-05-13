@@ -218,6 +218,7 @@ class GroupCoordinator(val brokerId: Int,
       } else if (!group.supportsProtocols(protocolType, MemberMetadata.plainProtocolSet(protocols))) {
         responseCallback(JoinGroupResult(JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.INCONSISTENT_GROUP_PROTOCOL))
       } else {
+        //生成成员ID
         val newMemberId = group.generateMemberId(clientId, groupInstanceId)
 
         if (group.hasStaticMember(groupInstanceId)) {
@@ -227,6 +228,7 @@ class GroupCoordinator(val brokerId: Int,
             // and send back a response to call for another join group request with allocated member id.
           debug(s"Dynamic member with unknown member id joins group ${group.groupId} in " +
               s"${group.currentState} state. Created a new member id $newMemberId and request the member to rejoin with this id.")
+          //将成员加入到消费组种。
           group.addPendingMember(newMemberId)
           addPendingMemberExpiration(group, newMemberId, sessionTimeoutMs)
           responseCallback(JoinGroupResult(newMemberId, Errors.MEMBER_ID_REQUIRED))

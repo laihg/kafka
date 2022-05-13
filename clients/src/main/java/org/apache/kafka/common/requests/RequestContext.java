@@ -34,13 +34,21 @@ import java.util.Optional;
 import static org.apache.kafka.common.protocol.ApiKeys.API_VERSIONS;
 
 public class RequestContext implements AuthorizableRequestContext {
+    // Request头部数据，主要是一些对用户不可见的元数据信息，如Request类型、Request API版本、clientId等
     public final RequestHeader header;
+    // Request发送方的TCP连接串标识，由Kafka根据一定规则定义，主要用于表示TCP连接
     public final String connectionId;
+    // Request发送方IP地址
     public final InetAddress clientAddress;
+    // Kafka用户认证类，用于认证授权
     public final KafkaPrincipal principal;
+    // 监听器名称，可以是预定义的监听器（如PLAINTEXT），也可自行定义
     public final ListenerName listenerName;
+    // 安全协议类型，目前支持4种：PLAINTEXT、SSL、SASL_PLAINTEXT、SASL_SSL
     public final SecurityProtocol securityProtocol;
+    // 用户自定义的一些连接方信息
     public final ClientInformation clientInformation;
+
     public final boolean fromPrivilegedListener;
     public final Optional<KafkaPrincipalSerde> principalSerde;
 
@@ -83,14 +91,22 @@ public class RequestContext implements AuthorizableRequestContext {
         this.principalSerde = principalSerde;
     }
 
+    /**
+     * 从给定的ByteBuffer中提取出Request和对应的Size值
+     * @param buffer
+     * @return
+     */
     public RequestAndSize parseRequest(ByteBuffer buffer) {
+        //不支持的版本请求
         if (isUnsupportedApiVersionsRequest()) {
             // Unsupported ApiVersion requests are treated as v0 requests and are not parsed
             ApiVersionsRequest apiVersionsRequest = new ApiVersionsRequest(new ApiVersionsRequestData(), (short) 0, header.apiVersion());
             return new RequestAndSize(apiVersionsRequest, 0);
         } else {
+            //请求的API类型
             ApiKeys apiKey = header.apiKey();
             try {
+                //根据API版本进行解析
                 short apiVersion = header.apiVersion();
                 return AbstractRequest.parseRequest(apiKey, apiVersion, buffer);
             } catch (Throwable ex) {

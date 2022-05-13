@@ -251,6 +251,7 @@ public class Metadata implements Closeable {
     }
 
     /**
+     * 更新集群元数据。如果启用了主题过期，则会根据需要为主题设置过期时间，并从元数据中删除过期的主题。
      * Updates the cluster metadata. If topic expiry is enabled, expiry time
      * is set for topics if required and expired topics are removed from the metadata.
      *
@@ -315,16 +316,20 @@ public class Metadata implements Closeable {
      * Transform a MetadataResponse into a new MetadataCache instance.
      */
     private MetadataCache handleMetadataResponse(MetadataResponse metadataResponse, boolean isPartialUpdate, long nowMs) {
-        // All encountered topics.
+        // All encountered topics. 所有的topic
         Set<String> topics = new HashSet<>();
 
         // Retained topics to be passed to the metadata cache.
+        //内部topic
         Set<String> internalTopics = new HashSet<>();
+        //未认证的topic
         Set<String> unauthorizedTopics = new HashSet<>();
+        //无效的topic
         Set<String> invalidTopics = new HashSet<>();
 
         List<MetadataResponse.PartitionMetadata> partitions = new ArrayList<>();
         Map<String, Uuid> topicIds = new HashMap<>();
+        //获取topic元素数据
         for (MetadataResponse.TopicMetadata metadata : metadataResponse.topicMetadata()) {
             String topicName = metadata.topic();
             Uuid topicId = metadata.topicId();

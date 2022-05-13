@@ -114,6 +114,9 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     private final String id;
+    /**
+     * 网络传输层处理，内部使用NIO进行网络通信
+     */
     private final TransportLayer transportLayer;
     private final Supplier<Authenticator> authenticatorCreator;
     private Authenticator authenticator;

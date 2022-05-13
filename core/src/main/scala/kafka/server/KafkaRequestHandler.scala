@@ -97,6 +97,16 @@ class KafkaRequestHandler(id: Int,
 
 }
 
+/**
+ * Kafka处理请求线程池
+ * @param brokerId broker id
+ * @param requestChannel 请求处理(重要)
+ * @param apis API版本处理器(重要)
+ * @param time
+ * @param numThreads 线程池处理线程数量
+ * @param requestHandlerAvgIdleMetricName
+ * @param logAndThreadNamePrefix
+ */
 class KafkaRequestHandlerPool(val brokerId: Int,
                               val requestChannel: RequestChannel,
                               val apis: ApiRequestHandler,

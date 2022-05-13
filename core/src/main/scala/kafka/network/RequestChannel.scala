@@ -53,6 +53,9 @@ object RequestChannel extends Logging {
 
   def isRequestLoggingEnabled: Boolean = requestLogger.underlying.isDebugEnabled
 
+  /**
+   * 定义一个基础请求接口类
+   */
   sealed trait BaseRequest
   case object ShutdownRequest extends BaseRequest
 
@@ -79,6 +82,20 @@ object RequestChannel extends Logging {
     }
   }
 
+  /**
+   * 处理请求类
+   * @param processor 处理请求ID
+   * @param context 记录本次请求上下文
+   * @param startTimeNanos 记录了 Request 对象被创建的时间，主要用于各种时间统计指标的计算。
+   * @param memoryPool 表示源码定义的一个非阻塞式的内存缓冲区，主要作用是避免 Request 对象无限使用内存。
+   *
+   * buffer 是真正保存 Request 对象内容的字节缓冲区。
+   * Request 发送方必须按照 Kafka RPC 协议规定的格式向该缓冲区写入字节，否则将抛出 InvalidRequestException 异常。
+   * 这个逻辑主要是由 RequestContext 的 parseRequest 方法实现的。
+   * @param buffer
+   * @param metrics
+   * @param envelope
+   */
   class Request(val processor: Int,
                 val context: RequestContext,
                 val startTimeNanos: Long,
@@ -99,6 +116,7 @@ object RequestChannel extends Logging {
 
     val session = Session(context.principal, context.clientAddress)
 
+    //获取请求的内容以及内容大小
     private val bodyAndSize: RequestAndSize = context.parseRequest(buffer)
 
     // This is constructed on creation of a Request so that the JSON representation is computed before the request is
@@ -107,6 +125,7 @@ object RequestChannel extends Logging {
       if (RequestChannel.isRequestLoggingEnabled) Some(RequestConvertToJson.request(loggableRequest))
       else None
 
+    //请求头
     def header: RequestHeader = context.header
 
     def sizeOfBodyInBytes: Int = bodyAndSize.size
@@ -122,6 +141,7 @@ object RequestChannel extends Logging {
 
     def isForwarded: Boolean = envelope.isDefined
 
+    //构建响应处理
     def buildResponseSend(abstractResponse: AbstractResponse): Send = {
       envelope match {
         case Some(request) =>
@@ -132,7 +152,7 @@ object RequestChannel extends Logging {
           context.buildResponseSend(abstractResponse)
       }
     }
-
+    //构建响应节点
     def responseNode(response: AbstractResponse): Option[JsonNode] = {
       if (RequestChannel.isRequestLoggingEnabled)
         Some(RequestConvertToJson.response(response, context.apiVersion))
@@ -341,7 +361,9 @@ class RequestChannel(val queueSize: Int,
                      time: Time,
                      val metrics: RequestChannel.Metrics) extends KafkaMetricsGroup {
   import RequestChannel._
+  //创建一个队列存放请求
   private val requestQueue = new ArrayBlockingQueue[BaseRequest](queueSize)
+  //创建Map存放请求处理ID对应的处理线程关系
   private val processors = new ConcurrentHashMap[Int, Processor]()
   val requestQueueSizeMetricName = metricNamePrefix.concat(RequestQueueSizeMetric)
   val responseQueueSizeMetricName = metricNamePrefix.concat(ResponseQueueSizeMetric)
@@ -354,6 +376,7 @@ class RequestChannel(val queueSize: Int,
     }
   })
 
+  //增加处理器线程
   def addProcessor(processor: Processor): Unit = {
     if (processors.putIfAbsent(processor.id, processor) != null)
       warn(s"Unexpected processor with processorId ${processor.id}")
@@ -362,16 +385,19 @@ class RequestChannel(val queueSize: Int,
       Map(ProcessorMetricTag -> processor.id.toString))
   }
 
+  //移除处理器线程
   def removeProcessor(processorId: Int): Unit = {
     processors.remove(processorId)
     removeMetric(responseQueueSizeMetricName, Map(ProcessorMetricTag -> processorId.toString))
   }
 
+  //发送请求，实则是将请求添加到请求队列中
   /** Send a request to be handled, potentially blocking until there is room in the queue for the request */
   def sendRequest(request: RequestChannel.Request): Unit = {
     requestQueue.put(request)
   }
 
+  //发送响应回调处理
   /** Send a response back to the socket server to be sent over the network */
   def sendResponse(response: RequestChannel.Response): Unit = {
 
@@ -403,19 +429,22 @@ class RequestChannel(val queueSize: Int,
       // For a given request, these may happen in addition to one in the previous section, skip updating the metrics
       case _: StartThrottlingResponse | _: EndThrottlingResponse => ()
     }
-
+    //根据响应对象获取对应的处理器线程ID
     val processor = processors.get(response.processor)
     // The processor may be null if it was shutdown. In this case, the connections
     // are closed, so the response is dropped.
     if (processor != null) {
+      //将响应入队列
       processor.enqueueResponse(response)
     }
   }
 
+  //根据指定的阻塞等待时间从队列中获取请求进行处理
   /** Get the next request or block until specified time has elapsed */
   def receiveRequest(timeout: Long): RequestChannel.BaseRequest =
     requestQueue.poll(timeout, TimeUnit.MILLISECONDS)
 
+  //从队列中获取请求进行处理，如果没有请求则一直处于阻塞状态
   /** Get the next request or block until there is one */
   def receiveRequest(): RequestChannel.BaseRequest =
     requestQueue.take()

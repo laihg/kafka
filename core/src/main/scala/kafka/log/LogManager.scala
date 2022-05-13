@@ -253,11 +253,15 @@ class LogManager(logDirs: Seq[File],
                            recoveryPoints: Map[TopicPartition, Long],
                            logStartOffsets: Map[TopicPartition, Long],
                            topicConfigOverrides: Map[String, LogConfig]): Log = {
+    //根据文件夹名称切割，获取topic对应的分区信息
     val topicPartition = Log.parseTopicPartitionName(logDir)
+    //获取topic分区配置信息
     val config = topicConfigOverrides.getOrElse(topicPartition.topic, currentDefaultConfig)
+    //日志恢复位置
     val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
+    //日志起始位移
     val logStartOffset = logStartOffsets.getOrElse(topicPartition, 0L)
-
+    //创建一个Log对象
     val log = Log(
       dir = logDir,
       config = config,
@@ -307,12 +311,13 @@ class LogManager(logDirs: Seq[File],
     var numTotalLogs = 0
 
     for (dir <- liveLogDirs) {
+      //存放日志文件目录的绝对路径
       val logDirAbsolutePath = dir.getAbsolutePath
       var hadCleanShutdown: Boolean = false
       try {
         val pool = Executors.newFixedThreadPool(numRecoveryThreadsPerDataDir)
         threadPools.append(pool)
-
+        //如果存在.kafka_cleanshutdown后缀文件则删除
         val cleanShutdownFile = new File(dir, Log.CleanShutdownFile)
         if (cleanShutdownFile.exists) {
           info(s"Skipping recovery for all logs in $logDirAbsolutePath since clean shutdown file was found")
@@ -342,18 +347,19 @@ class LogManager(logDirs: Seq[File],
             warn(s"Error occurred while reading log-start-offset-checkpoint file of directory " +
               s"$logDirAbsolutePath, resetting to the base offset of the first segment", e)
         }
-
+        //获取文件目录下所有的目录文件夹(正常是以topic命名的文件夹)
         val logsToLoad = Option(dir.listFiles).getOrElse(Array.empty).filter(logDir =>
           logDir.isDirectory && Log.parseTopicPartitionName(logDir).topic != KafkaRaftServer.MetadataTopic)
         val numLogsLoaded = new AtomicInteger(0)
         numTotalLogs += logsToLoad.length
-
+        //将所有的目录文件夹创建一个Runnable,交给线程池异步执行
         val jobsForDir = logsToLoad.map { logDir =>
           val runnable: Runnable = () => {
             try {
               debug(s"Loading log $logDir")
 
               val logLoadStartMs = time.hiResClockMs()
+              //加载日志文件
               val log = loadLog(logDir, hadCleanShutdown, recoveryPoints, logStartOffsets, topicConfigOverrides)
               val logLoadDurationMs = time.hiResClockMs() - logLoadStartMs
               val currentNumLoaded = numLogsLoaded.incrementAndGet()
@@ -368,7 +374,7 @@ class LogManager(logDirs: Seq[File],
           }
           runnable
         }
-
+        //异步执行
         jobs += jobsForDir.map(pool.submit)
       } catch {
         case e: IOException =>

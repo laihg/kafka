@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /*
  * Hierarchical Timing Wheels
- *
+ * 一个简单的时间轮是定时任务中不断循环的bucket。
  * A simple timing wheel is a circular list of buckets of timer tasks. Let u be the time unit.
  * A timing wheel with size n has n buckets and can hold timer tasks in n * u time interval.
  * Each bucket holds timer tasks that fall into the corresponding time range. At the beginning,
@@ -33,6 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * into the bucket for the current time since it is already expired. The timer immediately runs
  * the expired task. The emptied bucket is then available for the next round, so if the current
  * bucket is for the time t, it becomes the bucket for [t + u * n, t + (n + 1) * u) after a tick.
+ *
+ * 时间轮在插入和删除的时间复杂度是O(1),相对于jdk中的DelayQueue和Timer的时间复杂度是O(log n)更高效。
  * A timing wheel has O(1) cost for insert/delete (start-timer/stop-timer) whereas priority queue
  * based timers, such as java.util.concurrent.DelayQueue and java.util.Timer, have O(log n)
  * insert/delete cost.
@@ -87,7 +89,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * 1        [c+3,c+3]  [c+4,c+4]  [c+5,c+5]
  * 2        [c+3,c+5]  [c+6,c+8]  [c+9,c+11]
  * 3        [c,c+8]    [c+9,c+17] [c+8,c+11]
- *
+ * 可以将分层时间轮比做时钟，秒针每执行一圈，分钟向前推进一格。分针每执行一圈，时针向前推进一格。
  * The hierarchical timing wheels works especially well when operations are completed before they time out.
  * Even when everything times out, it still has advantageous when there are many items in the timer.
  * Its insert cost (including reinsert) and delete cost are O(m) and O(1), respectively while priority

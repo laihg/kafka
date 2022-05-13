@@ -35,20 +35,30 @@ import scala.jdk.CollectionConverters._
 import scala.math._
 
 /**
+ * 日志段，每个日志段有两部分，分别为日志文件和日志索引。日志文件中是存放实际的消息。
+ * 索引文件是存放OffsetIndex的映射关系来自于逻辑偏移量到物理文件位置。
+ * 每个日志段的起始位移 <= 当前日志段中任何消息的最小位移 > 任意一个前日志段中的任意一个位移。
  * A segment of the log. Each segment has two components: a log and an index. The log is a FileRecords containing
  * the actual messages. The index is an OffsetIndex that maps from logical offsets to physical file positions. Each
  * segment has a base offset which is an offset <= the least offset of any message in this segment and > any offset in
  * any previous segment.
  *
+ * 每个日志段的起始位移存储在两个文件中，一个是000000000base_offset.index,另外一个是000000000base_offset.log文件中，以起始位移作为文件名称。
  * A segment with a base offset of [base_offset] would be stored in two files, a [base_offset].index and a [base_offset].log file.
  *
- * @param log The file records containing log entries
- * @param lazyOffsetIndex The offset index
- * @param lazyTimeIndex The timestamp index
- * @param txnIndex The transaction index
- * @param baseOffset A lower bound on the offsets in this segment
- * @param indexIntervalBytes The approximate number of bytes between entries in the index
- * @param rollJitterMs The maximum random jitter subtracted from the scheduled segment roll time
+ * @param log The file records containing log entries 消息日志文件
+ * @param lazyOffsetIndex The offset index 位移索引文件
+ * @param lazyTimeIndex The timestamp index 时间戳索引
+ * @param txnIndex The transaction index 已中止事务索引文件
+ * @param baseOffset A lower bound on the offsets in this segment 日志段文件起始位移
+ *
+ * Broker端参数log.index.interval.bytes值，它控制了日志段对象新增索引项的频率。默认情况下，日志段至少新写入4KB的消息数据才会新增一条索引项。
+ * @param indexIntervalBytes The approximate number of bytes between entries in the index。
+ *
+ * 日志段对象新增倒计时的“扰动值”。因为目前 Broker端日志段新增倒计时是全局设置，这就是说，在未来的某个时刻可能同时创建多个日志段对象，这将极大地增加物理磁盘 I/O 压力。
+ * 有了 rollJitterMs 值的干扰，每个新增日志段在创建时会彼此岔开一小段时间，这样可以缓解物理磁盘的 I/O 负载瓶颈。
+ * @param rollJitterMs The maximum random jitter subtracted from the scheduled segment roll
+ *
  * @param time The time instance
  */
 @nonthreadsafe
@@ -127,6 +137,7 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   /**
+   * 根据指定的位移添加消息。如果需要的话会再新增一个索引。
    * Append the given messages starting with the given offset. Add
    * an entry to the index if needed.
    *
@@ -151,22 +162,27 @@ class LogSegment private[log] (val log: FileRecords,
       if (physicalPosition == 0)
         rollingBasedTimestamp = Some(largestTimestamp)
 
+      //确保输入参数最大位移值是合法的，合法范围在[0, Int.MaxValue]之间
       ensureOffsetInRange(largestOffset)
 
+      //将ByteBuffer中的消息数据追加到日志文件中
       // append the messages
       val appendedBytes = log.append(records)
       trace(s"Appended $appendedBytes to ${log.file} at end offset $largestOffset")
       // Update the in memory max timestamp and corresponding offset.
+      //更新日志段的最大时间戳以及最大时间戳所属消息的位移值属性。每个日志段都要保存当前最大时间戳信息和所属消息的位移信息。
       if (largestTimestamp > maxTimestampSoFar) {
-        maxTimestampSoFar = largestTimestamp
-        offsetOfMaxTimestampSoFar = shallowOffsetOfMaxTimestamp
+        maxTimestampSoFar = largestTimestamp //更新日志段的最大时间戳
+        offsetOfMaxTimestampSoFar = shallowOffsetOfMaxTimestamp //最大时间戳所属消息的位移值属性
       }
       // append an entry to the index (if needed)
+      //如果上次写入的消息大小大于指定的indexIntervalBytes(默认为4KB)，则新增一个索引
       if (bytesSinceLastIndexEntry > indexIntervalBytes) {
         offsetIndex.append(largestOffset, physicalPosition)
         timeIndex.maybeAppend(maxTimestampSoFar, offsetOfMaxTimestampSoFar)
-        bytesSinceLastIndexEntry = 0
+        bytesSinceLastIndexEntry = 0 //新增完成后置为0，重新开始计算
       }
+      //累加已写入的消息字节数
       bytesSinceLastIndexEntry += records.sizeInBytes
     }
   }
@@ -275,13 +291,14 @@ class LogSegment private[log] (val log: FileRecords,
   }
 
   /**
+   * 从第一个偏移量 >= startOffset开始读取日志文件段。如果指定了maxOffset，则消息集将包含不超过maxSize字节，并将在maxOffset之前结束。
    * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
    * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
    *
-   * @param startOffset A lower bound on the first offset to include in the message set we read
-   * @param maxSize The maximum number of bytes to include in the message set we read
-   * @param maxPosition The maximum position in the log segment that should be exposed for read
-   * @param minOneMessage If this is true, the first message will be returned even if it exceeds `maxSize` (if one exists)
+   * @param startOffset A lower bound on the first offset to include in the message set we read 读取消息的起始位移
+   * @param maxSize The maximum number of bytes to include in the message set we read 能读取的最大字节数
+   * @param maxPosition The maximum position in the log segment that should be exposed for read 能读到的最大文件位置
+   * @param minOneMessage If this is true, the first message will be returned even if it exceeds `maxSize` (if one exists) 是否允许在消息体过大时至少返回第一条消息。
    *
    * @return The fetched data and the offset metadata of the first message whose offset is >= startOffset,
    *         or null if the startOffset is larger than the largest offset in this log
@@ -322,6 +339,7 @@ class LogSegment private[log] (val log: FileRecords,
      offsetIndex.fetchUpperBoundOffset(startOffsetPosition, fetchSize).map(_.offset)
 
   /**
+   * 在给定的日志段上运行恢复。这将从日志文件中重建索引，并从日志和索引的末尾删除任何无效字节。
    * Run recovery on the given segment. This will rebuild the index from the log file and lop off any invalid bytes
    * from the end of the log and index.
    *
@@ -678,6 +696,9 @@ object LogSegment {
   }
 }
 
+/**
+ * 日志刷新统计，主要负责为日志落盘进行计时。
+ */
 object LogFlushStats extends KafkaMetricsGroup {
   val logFlushTimer = new KafkaTimer(newTimer("LogFlushRateAndTimeMs", TimeUnit.MILLISECONDS, TimeUnit.SECONDS))
 }

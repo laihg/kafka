@@ -307,7 +307,9 @@ public class Selector implements Selectable, AutoCloseable {
      * </p>
      */
     public void register(String id, SocketChannel socketChannel) throws IOException {
+        //校验连接没有注册过，如果已经注册过或该连接已关闭则抛异常
         ensureNotRegistered(id);
+        //注册读事件
         registerChannel(id, socketChannel, SelectionKey.OP_READ);
         this.sensors.connectionCreated.record();
         // Default to empty client information as the ApiVersionsRequest is not
@@ -325,8 +327,10 @@ public class Selector implements Selectable, AutoCloseable {
     }
 
     protected SelectionKey registerChannel(String id, SocketChannel socketChannel, int interestedOps) throws IOException {
+        //往NIO上注册事件
         SelectionKey key = socketChannel.register(nioSelector, interestedOps);
         KafkaChannel channel = buildAndAttachKafkaChannel(socketChannel, id, key);
+        //与连接简历映射关系
         this.channels.put(id, channel);
         if (idleExpiryManager != null)
             idleExpiryManager.update(channel.id(), time.nanoseconds());

@@ -54,6 +54,8 @@ public class Producer extends Thread {
             props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, transactionalId);
         }
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, enableIdempotency);
+        //默认阻塞时间修改为1小时，方便debug
+        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 60 * 60 * 1000);
 
         producer = new KafkaProducer<>(props);
         this.topic = topic;

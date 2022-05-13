@@ -235,7 +235,7 @@ public class Sender implements Runnable {
     @Override
     public void run() {
         log.debug("Starting Kafka producer I/O thread.");
-
+        //如果没有被关闭，则一直循环
         // main loop, runs until close is called
         while (running) {
             try {
@@ -330,8 +330,10 @@ public class Sender implements Runnable {
     private long sendProducerData(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        //发送消息之间的准备工作，获取broker leader节点
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
+        //如果有topic没有broker leader副本数据，则强制更新topic元数据
         // if there are any partitions whose leaders are not known yet, force metadata update
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
@@ -356,6 +358,7 @@ public class Sender implements Runnable {
             }
         }
 
+        //创建生产请求
         // create produce requests
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
         addToInflightBatches(batches);
@@ -367,8 +370,11 @@ public class Sender implements Runnable {
             }
         }
 
+        //重置下一次batch过期时间
         accumulator.resetNextBatchExpiryTime();
+        //获取已经过期且正在处理的batch
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
+        //获取已经过期的batch
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
         expiredBatches.addAll(expiredInflightBatches);
 
@@ -380,6 +386,7 @@ public class Sender implements Runnable {
         for (ProducerBatch expiredBatch : expiredBatches) {
             String errorMessage = "Expiring " + expiredBatch.recordCount + " record(s) for " + expiredBatch.topicPartition
                 + ":" + (now - expiredBatch.createdMs) + " ms has passed since batch creation";
+            //抛超时异常
             failBatch(expiredBatch, -1, NO_TIMESTAMP, new TimeoutException(errorMessage), false);
             if (transactionManager != null && expiredBatch.inRetry()) {
                 // This ensures that no new batches are drained until the current in flight batches are fully resolved.
@@ -404,6 +411,7 @@ public class Sender implements Runnable {
             // otherwise the select time will be the time difference between now and the metadata expiry time;
             pollTimeout = 0;
         }
+        //发送消息生产请求
         sendProduceRequests(batches, now);
         return pollTimeout;
     }

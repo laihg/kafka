@@ -56,6 +56,7 @@ class TimeIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writable:
 
   @volatile private var _lastEntry = lastEntryFromIndexFile
 
+  //时间戳类型是长整型，占用 8 个字节，位移依然使用相对位移值，占用 4 个字节，因此总共需要 12 个字节。
   override def entrySize = 12
 
   debug(s"Loaded index file ${file.getAbsolutePath} with maxEntries = $maxEntries, maxIndexSize = $maxIndexSize," +

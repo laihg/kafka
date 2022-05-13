@@ -43,11 +43,12 @@ public class SystemTime implements Time {
 
     @Override
     public void waitObject(Object obj, Supplier<Boolean> condition, long deadlineMs) throws InterruptedException {
+        //针对obj加锁，循环等待当前版本大于上一次请求的版本
         synchronized (obj) {
             while (true) {
                 if (condition.get())
                     return;
-
+                //如果当前时间大于截止时间，仍没有获取到元数据，则抛超时异常
                 long currentTimeMs = milliseconds();
                 if (currentTimeMs >= deadlineMs)
                     throw new TimeoutException("Condition not satisfied before deadline");

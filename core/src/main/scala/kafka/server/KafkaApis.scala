@@ -638,7 +638,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendResponseCallback(Map.empty)
     else {
       val internalTopicsAllowed = request.header.clientId == AdminUtils.AdminClientId
-
+      //将消息同步到follower副本
       // call the replica manager to append messages to the replicas
       replicaManager.appendRecords(
         timeout = produceRequest.timeout.toLong,
@@ -1467,7 +1467,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   def handleJoinGroupRequest(request: RequestChannel.Request): Unit = {
     val joinGroupRequest = request.body[JoinGroupRequest]
-
+    //加入组响应回调
     // the callback for sending a join-group response
     def sendResponseCallback(joinResult: JoinGroupResult): Unit = {
       def createResponse(requestThrottleMs: Int): AbstractResponse = {
@@ -1475,7 +1475,7 @@ class KafkaApis(val requestChannel: RequestChannel,
           joinResult.protocolName.orNull
         else
           joinResult.protocolName.getOrElse(GroupCoordinator.NoProtocol)
-
+        //封装响应内容
         val responseBody = new JoinGroupResponse(
           new JoinGroupResponseData()
             .setThrottleTimeMs(requestThrottleMs)
@@ -1492,6 +1492,7 @@ class KafkaApis(val requestChannel: RequestChannel,
           .format(responseBody, request.header.correlationId, request.header.clientId))
         responseBody
       }
+      //发送想用
       requestHelper.sendResponseMaybeThrottle(request, createResponse)
     }
 

@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets
 
 buildscript {
   repositories {
+    maven { url 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
     jcenter()
     maven {
@@ -54,6 +55,7 @@ spotless {
 allprojects {
 
   repositories {
+    maven { url 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
   }
 
@@ -222,7 +224,7 @@ subprojects {
           sign configurations.archives
 
           // To test locally, replace mavenUrl in ~/.gradle/gradle.properties to file://localhost/tmp/myRepo/
-          mavenDeployer {
+          /*mavenDeployer {
               beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
               repository(url: "${mavenUrl}") {
                   authentication(userName: "${mavenUsername}", password: "${mavenPassword}")
@@ -242,7 +244,7 @@ subprojects {
                       }
                   }
               }
-          }
+          }*/
       }
     }
   }

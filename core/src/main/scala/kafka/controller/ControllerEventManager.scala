@@ -29,6 +29,9 @@ import org.apache.kafka.common.utils.Time
 
 import scala.collection._
 
+/**
+ * 定义Controller事件管理器常量值
+ */
 object ControllerEventManager {
   val ControllerEventThreadName = "controller-event-thread"
   val EventQueueTimeMetricName = "EventQueueTimeMs"
@@ -36,7 +39,16 @@ object ControllerEventManager {
 }
 
 trait ControllerEventProcessor {
+  /**
+   * 接收一个 Controller 事件，并进行处理。
+   * @param event
+   */
   def process(event: ControllerEvent): Unit
+
+  /**
+   * 接收一个 Controller 事件，并抢占队列之前的事件进行优先处理。
+   * @param event
+   */
   def preempt(event: ControllerEvent): Unit
 }
 
@@ -75,7 +87,9 @@ class ControllerEventManager(controllerId: Int,
   import ControllerEventManager._
 
   @volatile private var _state: ControllerState = ControllerState.Idle
+
   private val putLock = new ReentrantLock()
+  //存放事件队列
   private val queue = new LinkedBlockingQueue[QueuedEvent]
   // Visible for test
   private[controller] var thread = new ControllerEventThread(ControllerEventThreadName)

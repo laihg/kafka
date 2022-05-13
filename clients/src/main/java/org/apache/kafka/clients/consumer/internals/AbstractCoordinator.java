@@ -360,8 +360,9 @@ public abstract class AbstractCoordinator implements Closeable {
         if (!ensureCoordinatorReady(timer)) {
             return false;
         }
-
+        //启动发送心跳线程
         startHeartbeatThreadIfNeeded();
+        //加入消费组
         return joinGroupIfNeeded(timer);
     }
 
@@ -390,6 +391,12 @@ public abstract class AbstractCoordinator implements Closeable {
     }
 
     /**
+     * 加入组而不启动心跳线程。
+     * 如果返回结果为true，则MemberState状态为STABLE
+     * 如果返回结果为false，分以下3种情况：
+     *  1. UNJOINED，得到错误响应但在能够重新加入之前超时
+     *  2. PREPARING_REBALANCE，超时前尚未收到加入组响应
+     *  3. COMPLETING_REBALANCE，超时前尚未收到同步组响应
      * Joins the group without starting the heartbeat thread.
      *
      * If this function returns true, the state must always be in STABLE and heartbeat enabled.
@@ -492,6 +499,10 @@ public abstract class AbstractCoordinator implements Closeable {
         this.joinFuture = null;
     }
 
+    /**
+     * 初始化消费者加入消费组
+     * @return
+     */
     private synchronized RequestFuture<ByteBuffer> initiateJoinGroup() {
         // we store the join future in case we are woken up by the user after beginning the
         // rebalance in the call to poll below. This ensures that we do not mistakenly attempt
@@ -502,7 +513,9 @@ public abstract class AbstractCoordinator implements Closeable {
             // in this case we would not update the start time.
             if (lastRebalanceStartMs == -1L)
                 lastRebalanceStartMs = time.milliseconds();
+            //发送加入组请求
             joinFuture = sendJoinGroupRequest();
+            //加入完成后，响应时间
             joinFuture.addListener(new RequestFutureListener<ByteBuffer>() {
                 @Override
                 public void onSuccess(ByteBuffer value) {
@@ -524,6 +537,8 @@ public abstract class AbstractCoordinator implements Closeable {
     }
 
     /**
+     * 发送加入消费组请求，返回下一个分配的generation。
+     * 这里同时处理加入组和同步组操作。
      * Join the group and return the assignment for the next generation. This function handles both
      * JoinGroup and SyncGroup, delegating to {@link #performAssignment(String, String, List)} if
      * elected leader by the coordinator.
@@ -1403,6 +1418,7 @@ public abstract class AbstractCoordinator implements Closeable {
                             AbstractCoordinator.this.wait(rebalanceConfig.retryBackoffMs);
                         } else {
                             heartbeat.sentHeartbeat(now);
+                            //发送心跳请求
                             final RequestFuture<Void> heartbeatFuture = sendHeartbeatRequest();
                             heartbeatFuture.addListener(new RequestFutureListener<Void>() {
                                 @Override

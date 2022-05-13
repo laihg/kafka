@@ -54,6 +54,8 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
     extends AbstractIndex(_file, baseOffset, maxIndexSize, writable) {
   import OffsetIndex._
 
+  //位移值用4个字节来表示，物理磁盘位置也用4个字节来表示，所以总共是8个字节
+  //这里的位移值，实际上是相对于 baseOffset 的相对位移值，即真实位移值减去 baseOffset 的值
   override def entrySize = 8
 
   /* the last offset in the index */
@@ -77,6 +79,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
   def lastOffset: Long = _lastOffset
 
   /**
+   * 查找小于或等于给定 targetOffset 的最大偏移量，并返回一对持有这个偏移量及其对应的物理文件位置。
    * Find the largest offset less than or equal to the given targetOffset
    * and return a pair holding this offset and its corresponding physical file position.
    *

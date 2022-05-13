@@ -24,6 +24,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 
 /**
+ * 每次做更新操作时,从原有副本上copy一份进行操作,针对copy的副本进行更新操作。
+ * 这种实现方式的优点是读写之间不需要加互斥锁，如果加互斥锁可能需要等待才能读或者写。
+ * 缺点是copy副本会占用内存，如果对象比较大，那么会占用一定内存。 所以适合读多写少的场景。
  * A simple read-optimized map implementation that synchronizes only writes and does a full copy on each modification
  */
 public class CopyOnWriteMap<K, V> implements ConcurrentMap<K, V> {

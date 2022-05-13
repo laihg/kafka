@@ -174,7 +174,7 @@ public class ProducerConfig extends AbstractConfig {
                                                     + "not all memory the producer uses is used for buffering. Some additional memory will be used for compression (if "
                                                     + "compression is enabled) as well as for maintaining in-flight requests.";
 
-    /** <code>retry.backoff.ms</code> */
+    /** <code>retry.backoff.ms</code> 重试发送间隔时间 */
     public static final String RETRY_BACKOFF_MS_CONFIG = CommonClientConfigs.RETRY_BACKOFF_MS_CONFIG;
 
     /** <code>compression.type</code> */

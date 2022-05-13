@@ -1170,7 +1170,9 @@ public final class Utils {
         if (buffer.hasArray()) {
             out.write(buffer.array(), buffer.position() + buffer.arrayOffset(), length);
         } else {
+            //bytebuffer可写入的起始位置
             int pos = buffer.position();
+            //假设pos=5，要写入的数据length=20，所以i最大遍历次数为(length + pos) - pos = 20次
             for (int i = pos; i < length + pos; i++)
                 out.writeByte(buffer.get(i));
         }

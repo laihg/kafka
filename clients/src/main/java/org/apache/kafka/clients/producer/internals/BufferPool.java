@@ -45,12 +45,16 @@ import org.apache.kafka.common.utils.Time;
 public class BufferPool {
 
     static final String WAIT_TIME_SENSOR_NAME = "bufferpool-wait-time";
-
+    //总内存 默认为32MB
     private final long totalMemory;
+    //
     private final int poolableSize;
     private final ReentrantLock lock;
+    //空闲可用内存
     private final Deque<ByteBuffer> free;
     private final Deque<Condition> waiters;
+    //非池化可用内存(包含已分配给ByteBuffer的内存，但还未归还到池中)
+    //总的可用内存 = 非池化可用内存 + 空闲内存
     /** Total available memory is the sum of nonPooledAvailableMemory and the number of byte buffers in free * poolableSize.  */
     private long nonPooledAvailableMemory;
     private final Metrics metrics;
@@ -128,11 +132,14 @@ public class BufferPool {
             // memory on hand or if we need to block
             int freeListSize = freeSize() * this.poolableSize;
             if (this.nonPooledAvailableMemory + freeListSize >= size) {
+                //如果可用内存大于等于需分配的大小
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request, but need to allocate the buffer
                 freeUp(size);
+                //非池化可用内存 减去需要分配的内存大小
                 this.nonPooledAvailableMemory -= size;
             } else {
+                //如果可用内存小于需分配的内存大小(可用内存不足)，则进入阻塞状态
                 // we are out of memory and will have to block
                 int accumulated = 0;
                 Condition moreMemory = this.lock.newCondition();
@@ -155,7 +162,7 @@ public class BufferPool {
 
                         if (this.closed)
                             throw new KafkaException("Producer closed while allocating memory");
-
+                        //阻塞等待时间已经到了，仍旧没有获取到可用内存
                         if (waitingTimeElapsed) {
                             this.metrics.sensor("buffer-exhausted-records").record();
                             throw new BufferExhaustedException("Failed to allocate memory within the configured max blocking time " + maxTimeToBlockMs + " ms.");
@@ -178,6 +185,8 @@ public class BufferPool {
                             accumulated += got;
                         }
                     }
+                    //在这里将可用内存置为0，可能会有些误解。但实际kafka是考虑到如果不抛异常且有可用内存的情况下，
+                    //这个临时变量的值会累计到nonPooledAvailableMemory中，如果抛了异常，则通过finally的方式将这个临时变量的值会累计到nonPooledAvailableMemory。
                     // Don't reclaim memory on throwable since nothing was thrown
                     accumulated = 0;
                 } finally {
@@ -239,6 +248,8 @@ public class BufferPool {
     }
 
     /**
+     * 如果空闲队列不为空且非池化可用的内存小于需分配的内存大小，则</br>
+     * 非池化最新可用的内存容量 = 非池化上次可用的内存容量 + 空闲队列中最后一个ByteBuffer的容量
      * Attempt to ensure we have at least the requested number of bytes of memory for allocation by deallocating pooled
      * buffers (if needed)
      */

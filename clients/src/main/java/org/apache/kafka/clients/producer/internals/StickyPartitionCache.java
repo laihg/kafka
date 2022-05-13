@@ -58,6 +58,7 @@ public class StickyPartitionCache {
                 newPart = availablePartitions.get(0).partition();
             } else {
                 while (newPart == null || newPart.equals(oldPart)) {
+                    //生成随机数，对其进行取模得到发送消息的分区
                     int random = Utils.toPositive(ThreadLocalRandom.current().nextInt());
                     newPart = availablePartitions.get(random % availablePartitions.size()).partition();
                 }

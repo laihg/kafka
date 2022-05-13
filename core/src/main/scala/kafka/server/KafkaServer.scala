@@ -243,11 +243,13 @@ class KafkaServer(
 
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
+        //启动日志管理器
         /* start log manager */
         logManager = LogManager(config, initialOfflineDirs,
           new ZkConfigRepository(new AdminZkClient(zkClient)),
           kafkaScheduler, time, brokerTopicStats, logDirFailureChannel, config.usesTopicId)
         brokerState.set(BrokerState.RECOVERY)
+        //从zk上获取所有的topic信息
         logManager.startup(zkClient.getAllTopicsInCluster())
 
         metadataCache = MetadataCache.zkMetadataCache(config.brokerId)
