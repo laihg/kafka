@@ -38,6 +38,9 @@ import scala.util.{Failure, Success, Try}
 import kafka.utils.Implicits._
 
 /**
+ * 这个类是Kafka log管理的切入点。 日志管理器主要的职责是创建log文件，恢复，清除日志文件。
+ * 所有的读写操作都通过log实例进行。 每个Partition的leader或follower副本就是一个Replica，每个Partition Replica对应了一个Log实例。
+ * Log实际上就是一个文件目录，目录下会拆分成多个log segment。日志段表示.log文件，目录下还有会有.index,.timeindex索引文件。
  * The entry point to the kafka log management subsystem. The log manager is responsible for log creation, retrieval, and cleaning.
  * All read and write operations are delegated to the individual log instances.
  *

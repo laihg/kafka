@@ -238,8 +238,17 @@ class Partition(val topicPartition: TopicPartition,
   // start offset for 'leaderEpoch' above (leader epoch of the current leader for this partition),
   // defined when this broker is leader for partition
   @volatile private var leaderEpochStartOffsetOpt: Option[Long] = None
+  /**
+   * leader replica id 信息
+   */
   @volatile var leaderReplicaIdOpt: Option[Int] = None
+  /**
+   * Partition ISR列表
+   */
   @volatile private[cluster] var isrState: IsrState = CommittedIsr(Set.empty)
+  /**
+   * 分配状态
+   */
   @volatile var assignmentState: AssignmentState = SimpleAssignmentState(Seq.empty)
 
   // Logs belonging to this partition. Majority of time it will be only one log, but if log directory
@@ -1055,11 +1064,16 @@ class Partition(val topicPartition: TopicPartition,
 
   def appendRecordsToLeader(records: MemoryRecords, origin: AppendOrigin, requiredAcks: Int): LogAppendInfo = {
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
+      //判断当前partition是否为leader partition
       leaderLogIfLocal match {
         case Some(leaderLog) =>
+          //最小同步副本数
           val minIsr = leaderLog.config.minInSyncReplicas
+          //ISR列表数量
           val inSyncSize = isrState.isr.size
 
+          //如果ISR列表数量(已完全同步的副本)小于要求的最少副本数且acks=-1，则抛副本数不足异常。
+          //假设要求最小同步副本数为3，但ISR列表中是有2个，且acks=-1，就会抛异常。
           // Avoid writing to leader if there are not enough insync replicas to make it safe
           if (inSyncSize < minIsr && requiredAcks == -1) {
             throw new NotEnoughReplicasException(s"The size of the current ISR ${isrState.isr} " +
@@ -1228,6 +1242,7 @@ class Partition(val topicPartition: TopicPartition,
     if (!isFromConsumer) {
       allOffsets
     } else {
+      //partition leader副本的高水位，消费者只能读取高水位之前的位移数据。
       val hw = localLog.highWatermark
       if (allOffsets.exists(_ > hw))
         hw +: allOffsets.dropWhile(_ > hw)

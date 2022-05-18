@@ -638,7 +638,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendResponseCallback(Map.empty)
     else {
       val internalTopicsAllowed = request.header.clientId == AdminUtils.AdminClientId
-      //将消息同步到follower副本
+      //将消息同步到副本,所有的partition副本都是replica，只是有的副本是leader，有的是follower
       // call the replica manager to append messages to the replicas
       replicaManager.appendRecords(
         timeout = produceRequest.timeout.toLong,
@@ -1328,14 +1328,18 @@ class KafkaApis(val requestChannel: RequestChannel,
         !authHelper.authorize(request.context, DESCRIBE, TRANSACTIONAL_ID, findCoordinatorRequest.data.key))
       requestHelper.sendErrorResponseMaybeThrottle(request, Errors.TRANSACTIONAL_ID_AUTHORIZATION_FAILED.exception)
     else {
+      //findCoordinatorRequest.data.keyType 消费组类型
       val (partition, internalTopicName) = CoordinatorType.forId(findCoordinatorRequest.data.keyType) match {
         case CoordinatorType.GROUP =>
+          //findCoordinatorRequest.data.key = 消费组ID
+          //根据消费组哈希值 % __consumer_offsets下的partition数量 确定消费组所在的分区，拿到这个partition就能获取到partition的leader副本所在的broker信息
           (groupCoordinator.partitionFor(findCoordinatorRequest.data.key), GROUP_METADATA_TOPIC_NAME)
 
         case CoordinatorType.TRANSACTION =>
           (txnCoordinator.partitionFor(findCoordinatorRequest.data.key), TRANSACTION_STATE_TOPIC_NAME)
       }
 
+      //获取topic元数据
       val topicMetadata = metadataCache.getTopicMetadata(Set(internalTopicName), request.context.listenerName)
       def createFindCoordinatorResponse(error: Errors,
                                         node: Node,
@@ -1361,9 +1365,13 @@ class KafkaApis(val requestChannel: RequestChannel,
             createFindCoordinatorResponse(Errors.COORDINATOR_NOT_AVAILABLE, Node.noNode, requestThrottleMs)
           } else {
             val coordinatorEndpoint = topicMetadata.head.partitions.asScala
+              //查询元数据中等于计算出来的partition
               .find(_.partitionIndex == partition)
+              //过滤调元数据中leader为-1的broker
               .filter(_.leaderId != MetadataResponse.NO_LEADER_ID)
+              //根据 broker leader获取存活的broker
               .flatMap(metadata => metadataCache.getAliveBroker(metadata.leaderId))
+              //获取listenerName中的值
               .flatMap(_.endpoints.get(request.context.listenerName.value()))
               .filterNot(_.isEmpty)
 
@@ -1506,6 +1514,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     } else {
       val groupInstanceId = Option(joinGroupRequest.data.groupInstanceId)
 
+      //4版本之后要求groupInstanceId不能为空
       // Only return MEMBER_ID_REQUIRED error if joinGroupRequest version is >= 4
       // and groupInstanceId is configured to unknown.
       val requireKnownMemberId = joinGroupRequest.version >= 4 && groupInstanceId.isEmpty

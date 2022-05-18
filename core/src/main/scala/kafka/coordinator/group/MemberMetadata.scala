@@ -32,7 +32,15 @@ private object MemberMetadata {
   def plainProtocolSet(supportedProtocols: List[(String, Array[Byte])]) = supportedProtocols.map(_._1).toSet
 }
 
+
 /**
+ * 消费者成员元数据主要包含以下信息：
+ * 心跳元数据
+ * 1.协商的心跳会话超时事件
+ * 2.上一次心跳的时间戳
+ *
+ * 协议元数据
+ * 1.
  * Member metadata contains the following metadata:
  *
  * Heartbeat metadata:
@@ -68,6 +76,9 @@ private[group] class MemberMetadata(var memberId: String,
   var isLeaving: Boolean = false
   var isNew: Boolean = false
 
+  //如果groupInstanceId不为空，则说明是静态成员。
+  //静态成员配以较大的session超时设置能够避免因成员临时不可用（比如重启）而引发的Rebalance。
+  //由此可见，消费者组静态成员是2.3版本新引入的一个概念，主要是为了避免不必要的Rebalance。
   def isStaticMember: Boolean = groupInstanceId.isDefined
 
   // This variable is used to track heartbeat completion through the delayed

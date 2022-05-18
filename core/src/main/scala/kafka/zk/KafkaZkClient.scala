@@ -108,6 +108,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
   def registerControllerAndIncrementControllerEpoch(controllerId: Int): (Int, Int) = {
     val timestamp = time.milliseconds()
 
+    //获取当前controller的epoch值，如果broker的epoch值为空则创建一个epoch节点
     // Read /controller_epoch to get the current controller epoch and zkVersion,
     // create /controller_epoch with initial value if not exists
     val (curEpoch, curEpochZkVersion) = getControllerEpoch
@@ -424,7 +425,9 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     * @return map of broker to epoch in the cluster.
     */
   def getAllBrokerAndEpochsInCluster: Map[Broker, Long] = {
+    //获取的broker id并进行排序
     val brokerIds = getSortedBrokerList
+
     val getDataRequests = brokerIds.map(brokerId => GetDataRequest(BrokerIdZNode.path(brokerId), ctx = Some(brokerId)))
     val getDataResponses = retryRequestsUntilConnected(getDataRequests)
     getDataResponses.flatMap { getDataResponse =>

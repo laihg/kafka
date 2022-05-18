@@ -213,11 +213,16 @@ class ControllerContext {
     liveBrokers += newMetadata
   }
 
+  //存活的broker id
   // getter
   def liveBrokerIds: Set[Int] = liveBrokerEpochs.keySet.diff(shuttingDownBrokerIds)
+  //存活或正在关闭的broker id
   def liveOrShuttingDownBrokerIds: Set[Int] = liveBrokerEpochs.keySet
+  //存活的broker
   def liveOrShuttingDownBrokers: Set[Broker] = liveBrokers
+  //存活的broker epoch
   def liveBrokerIdAndEpochs: Map[Int, Long] = liveBrokerEpochs
+
   def liveOrShuttingDownBroker(brokerId: Int): Option[Broker] = liveOrShuttingDownBrokers.find(_.id == brokerId)
 
   def partitionsOnBroker(brokerId: Int): Set[TopicPartition] = {

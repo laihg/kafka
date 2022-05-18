@@ -316,7 +316,7 @@ public class Fetcher<K, V> implements Closeable {
 
                                     Iterator<? extends RecordBatch> batches = partitionData.records().batches().iterator();
                                     short responseVersion = resp.requestHeader().apiVersion();
-
+                                    //将拉取的数据放入队列中
                                     completedFetches.add(new CompletedFetch(partition, partitionData,
                                             metricAggregator, batches, fetchOffset, responseVersion));
                                 }
@@ -605,6 +605,7 @@ public class Fetcher<K, V> implements Closeable {
         try {
             while (recordsRemaining > 0) {
                 if (nextInLineFetch == null || nextInLineFetch.isConsumed) {
+                    //是否存在fetch完成的数据
                     CompletedFetch records = completedFetches.peek();
                     if (records == null) break;
 
@@ -628,6 +629,7 @@ public class Fetcher<K, V> implements Closeable {
                     }
                     completedFetches.poll();
                 } else if (subscriptions.isPaused(nextInLineFetch.partition)) {
+                    //consumer暂停消费分区,调用 SubscriptionState#resume()恢复
                     // when the partition is paused we add the records back to the completedFetches queue instead of draining
                     // them so that they can be returned on a subsequent poll if the partition is resumed at that time
                     log.debug("Skipping fetching records for assigned partition {} because it is paused", nextInLineFetch.partition);
@@ -668,15 +670,18 @@ public class Fetcher<K, V> implements Closeable {
 
     private List<ConsumerRecord<K, V>> fetchRecords(CompletedFetch completedFetch, int maxRecords) {
         if (!subscriptions.isAssigned(completedFetch.partition)) {
+            //partition没有分配给当前消费者消费，如果在获取的记录返回到消费者的轮询调用之前发生了重新平衡，则可能会发生这种情况
             // this can happen when a rebalance happened before fetched records are returned to the consumer's poll call
             log.debug("Not returning fetched records for partition {} since it is no longer assigned",
                     completedFetch.partition);
         } else if (!subscriptions.isFetchable(completedFetch.partition)) {
+            //在加载数据的时候，暂停消费者消费此分区或者重置了分区消费偏移量，会发生这种情况
             // this can happen when a partition is paused before fetched records are returned to the consumer's
             // poll call or if the offset is being reset
             log.debug("Not returning fetched records for assigned partition {} since it is no longer fetchable",
                     completedFetch.partition);
         } else {
+            //获取要拉取分区的消费位移
             FetchPosition position = subscriptions.position(completedFetch.partition);
             if (position == null) {
                 throw new IllegalStateException("Missing position for fetchable partition " + completedFetch.partition);
@@ -689,6 +694,7 @@ public class Fetcher<K, V> implements Closeable {
                         partRecords.size(), position, completedFetch.partition);
 
                 if (completedFetch.nextFetchOffset > position.offset) {
+                    //更新下一次消费的位移
                     FetchPosition nextPosition = new FetchPosition(
                             completedFetch.nextFetchOffset,
                             completedFetch.lastEpoch,
@@ -1110,6 +1116,7 @@ public class Fetcher<K, V> implements Closeable {
     }
 
     /**
+     * 选择从哪个partition leader副本上拉取数据
      * Determine which replica to read from.
      */
     Node selectReadReplica(TopicPartition partition, Node leaderReplica, long currentTimeMs) {
@@ -1144,6 +1151,7 @@ public class Fetcher<K, V> implements Closeable {
     }
 
     /**
+     * 准备发起拉取数据请求
      * Create fetch requests for all nodes for which we have assigned partitions
      * that have no existing requests in flight.
      */
@@ -1160,6 +1168,7 @@ public class Fetcher<K, V> implements Closeable {
                 throw new IllegalStateException("Missing position for fetchable partition " + partition);
             }
 
+            //当前partition副本的leader broker节点
             Optional<Node> leaderOpt = position.currentLeader.leader;
             if (!leaderOpt.isPresent()) {
                 log.debug("Requesting metadata update for partition {} since the position {} is missing the current leader node", partition, position);
@@ -1169,6 +1178,7 @@ public class Fetcher<K, V> implements Closeable {
 
             // Use the preferred read replica if set, otherwise the position's leader
             Node node = selectReadReplica(partition, leaderOpt.get(), currentTimeMs);
+            //校验选择的leader partition所在的broker节点是否可用
             if (client.isUnavailable(node)) {
                 client.maybeThrowAuthFailure(node);
 
@@ -1617,6 +1627,7 @@ public class Fetcher<K, V> implements Closeable {
                     records.add(parseRecord(partition, currentBatch, lastRecord));
                     recordsRead++;
                     bytesRead += lastRecord.sizeInBytes();
+                    //下一次要消费的位移
                     nextFetchOffset = lastRecord.offset() + 1;
                     // In some cases, the deserialization may have thrown an exception and the retry may succeed,
                     // we allow user to move forward in this case.

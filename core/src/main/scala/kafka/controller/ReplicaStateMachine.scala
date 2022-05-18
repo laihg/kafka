@@ -76,6 +76,15 @@ abstract class ReplicaStateMachine(controllerContext: ControllerContext) extends
 }
 
 /**
+ * 记录partition副本的状态。 它定义了副本可以处于的状态，并转换为将副本移动到另一个合法状态。
+ * 1.NewReplica：在partition重新分配的时候，controller可以创建一个新的replica，状态为NewReplica。在这个状态只能接收成为follower副本状态变更的请求。
+ * 2.OnlineReplica 当分配的副本已经启动，则状态为OnlineReplica，表示已在线。在这个状态下，可以接收成员leader或follower副本状态变更的请求。
+ * 3.OfflineReplica 当副本不可用，需要移除时则状态为OfflineReplica，表示下线。 当broker宕机的情况下，副本状态为这个。
+ * 4.ReplicaDeletionStarted  如果副本删除开始，则标记为此状态。
+ * 5.ReplicaDeletionSuccessful 如果副本删除成功，且返回的响应请求没有错误代码，则说明副本删除成功。
+ * 6.ReplicaDeletionIneligible 如果副本删除失败，则标记为此状态。
+ * 7.NonExistentReplica 如果成功删除副本，则标记为此状态。
+ *
  * This class represents the state machine for replicas. It defines the states that a replica can be in, and
  * transitions to move the replica to another legal state. The different states that a replica can be in are -
  * 1. NewReplica        : The controller can create new replicas during partition reassignment. In this state, a

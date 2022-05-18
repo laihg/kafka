@@ -91,6 +91,7 @@ class ControllerEventManager(controllerId: Int,
   private val putLock = new ReentrantLock()
   //存放事件队列
   private val queue = new LinkedBlockingQueue[QueuedEvent]
+  //处理事件的线程
   // Visible for test
   private[controller] var thread = new ControllerEventThread(ControllerEventThreadName)
 
@@ -131,6 +132,7 @@ class ControllerEventManager(controllerId: Int,
   class ControllerEventThread(name: String) extends ShutdownableThread(name = name, isInterruptible = false) {
     logIdent = s"[ControllerEventThread controllerId=$controllerId] "
 
+    //处理事件
     override def doWork(): Unit = {
       val dequeued = pollFromEventQueue()
       dequeued.event match {

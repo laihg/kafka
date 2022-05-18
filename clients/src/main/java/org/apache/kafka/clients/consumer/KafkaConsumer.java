@@ -1078,6 +1078,12 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     /**
+     * 手动给这个consumer分配partition，这个接口不允许增量分配或替换前一次分配。
+     * 如果入参的partitions为空，则调用unsubscribe()方法。
+     * 通过这种方法手动分配主题不使用消费者的组管理功能。比如消费组成员变更或集群下的topic元数据发生变化都不会触发rebalance操作。
+     * 同一consumer不能同时使用{@link #assign(Collection)}和{@link #subscribe(Collection, ConsumerRebalanceListener)}方法。
+     * 如果启动了自动提交，在新分配替换旧分配之前将触发异步提交（基于旧分配）。
+     *
      * Manually assign a list of partitions to this consumer. This interface does not allow for incremental assignment
      * and will replace the previous assignment (if there is one).
      * <p>
@@ -1235,7 +1241,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                         log.warn("Still waiting for metadata");
                     }
                 }
-
+                //从broker上拉取数据
                 final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollForFetches(timer);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches
@@ -1260,7 +1266,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     boolean updateAssignmentMetadataIfNeeded(final Timer timer, final boolean waitForJoinGroup) {
-        //协调者不为空
+        //重点处理逻辑，加入组，同步组，指定分区方案，心跳都在这步完成
         if (coordinator != null && !coordinator.poll(timer, waitForJoinGroup)) {
             return false;
         }

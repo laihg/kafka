@@ -241,7 +241,8 @@ public class SubscriptionState {
     }
 
     /**
-     * @return true if assignments matches subscription, otherwise false
+     * 检查分配的topic是否与订阅的topic一致。
+     * @return true if assignments matches subscription, otherwise false 一致返回true，否则返回false
      */
     public synchronized boolean checkAssignmentMatchedSubscription(Collection<TopicPartition> assignments) {
         for (TopicPartition topicPartition : assignments) {

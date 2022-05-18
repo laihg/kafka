@@ -348,6 +348,9 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   }
 
   /**
+   * partition leader副本选举
+   */
+  /**
    * Try to elect leaders for multiple partitions.
    * Electing a leader for a partition updates partition state in zookeeper.
    *
@@ -370,10 +373,14 @@ class ZkPartitionStateMachine(config: KafkaConfig,
         return (partitions.iterator.map(_ -> Left(e)).toMap, Seq.empty)
     }
     val failedElections = mutable.Map.empty[TopicPartition, Either[Exception, LeaderAndIsr]]
+
+    //有效的leader副本和isr列表
     val validLeaderAndIsrs = mutable.Buffer.empty[(TopicPartition, LeaderAndIsr)]
 
     getDataResponses.foreach { getDataResponse =>
+      //partition
       val partition = getDataResponse.ctx.get.asInstanceOf[TopicPartition]
+      //partition状态
       val currState = partitionState(partition)
       if (getDataResponse.resultCode == Code.OK) {
         TopicPartitionStateZNode.decode(getDataResponse.data, getDataResponse.stat) match {
@@ -404,20 +411,26 @@ class ZkPartitionStateMachine(config: KafkaConfig,
       return (failedElections.toMap, Seq.empty)
     }
 
+    //partitionsWithoutLeaders：没有领导者的分区，partitionsWithLeaders ：有领导者的分区
     val (partitionsWithoutLeaders, partitionsWithLeaders) = partitionLeaderElectionStrategy match {
       case OfflinePartitionLeaderElectionStrategy(allowUnclean) =>
+        //partition leader 下线选举策略
         val partitionsWithUncleanLeaderElectionState = collectUncleanLeaderElectionState(
           validLeaderAndIsrs,
           allowUnclean
         )
         leaderForOffline(controllerContext, partitionsWithUncleanLeaderElectionState).partition(_.leaderAndIsr.isEmpty)
       case ReassignPartitionLeaderElectionStrategy =>
+        //partition leader 重新分配选举策略
         leaderForReassign(controllerContext, validLeaderAndIsrs).partition(_.leaderAndIsr.isEmpty)
       case PreferredReplicaPartitionLeaderElectionStrategy =>
+        //partition leader 首选分配选举策略
         leaderForPreferredReplica(controllerContext, validLeaderAndIsrs).partition(_.leaderAndIsr.isEmpty)
       case ControlledShutdownPartitionLeaderElectionStrategy =>
+        //controller 停止 partition leader分配选举策略
         leaderForControlledShutdown(controllerContext, validLeaderAndIsrs).partition(_.leaderAndIsr.isEmpty)
     }
+    //没有领导者的分区
     partitionsWithoutLeaders.foreach { electionResult =>
       val partition = electionResult.topicPartition
       val failMsg = s"Failed to elect leader for partition $partition under strategy $partitionLeaderElectionStrategy"
@@ -519,6 +532,9 @@ class ZkPartitionStateMachine(config: KafkaConfig,
   }
 }
 
+/**
+ * partition leader选举算法
+ */
 object PartitionLeaderElectionAlgorithms {
   def offlinePartitionLeaderElection(assignment: Seq[Int], isr: Seq[Int], liveReplicas: Set[Int], uncleanLeaderElectionEnabled: Boolean, controllerContext: ControllerContext): Option[Int] = {
     assignment.find(id => liveReplicas.contains(id) && isr.contains(id)).orElse {

@@ -181,6 +181,16 @@ case class CommitRecordMetadataAndOffset(appendedBatchOffset: Option[Long], offs
 }
 
 /**
+ * 消费者组包含以下元数据：
+ * 消费者成员元数据：
+ * 1.注册在消费者下的消费者成员列表
+ * 2.消费组当前的协议
+ * 3.消费组成员管理的协议元数据
+ *
+ * 状态元数据：
+ * 1.消费组状态
+ * 2.版本ID
+ * 3.消费组中consumer leader id
  * Group contains the following metadata:
  *
  *  Membership metadata:
@@ -204,8 +214,11 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   var protocolType: Option[String] = None
   var protocolName: Option[String] = None
   var generationId = 0
+
+  //consumer group中的leader consumer
   private var leaderId: Option[String] = None
 
+  //消费者成员元数据
   private val members = new mutable.HashMap[String, MemberMetadata]
   // Static membership mapping [key: group.instance.id, value: member.id]
   private val staticMembers = new mutable.HashMap[String, String]

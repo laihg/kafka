@@ -75,6 +75,9 @@ class GroupMetadataManager(brokerId: Int,
   /* shutting down flag */
   private val shuttingDown = new AtomicBoolean(false)
 
+  /**
+   * consumer topic的分区数量
+   */
   /* number of partitions for the consumer metadata topic */
   @volatile private var groupMetadataTopicPartitionCount: Int = _
 

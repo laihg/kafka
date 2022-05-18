@@ -72,6 +72,11 @@ public class RangeAssignor extends AbstractPartitionAssignor {
         return RANGE_ASSIGNOR_NAME;
     }
 
+    /**
+     * 获取topic被哪些consumer订阅了
+     * @param consumerMetadata 消费者元数据，key：消费者成员ID，value：订阅了哪些topic
+     * @return key:topic名称，value:消费者信息
+     */
     private Map<String, List<MemberInfo>> consumersPerTopic(Map<String, Subscription> consumerMetadata) {
         Map<String, List<MemberInfo>> topicToConsumers = new HashMap<>();
         for (Map.Entry<String, Subscription> subscriptionEntry : consumerMetadata.entrySet()) {
@@ -84,9 +89,17 @@ public class RangeAssignor extends AbstractPartitionAssignor {
         return topicToConsumers;
     }
 
+    /**
+     * 对消费者订阅的topic所要消费的partition进行分配
+     * @param partitionsPerTopic The number of partitions for each subscribed topic. Topics not in metadata will be excluded
+     *                           from this map. key：topic名称，value：topic partition数量
+     * @param subscriptions Map from the member id to their respective topic subscription key：消费者成员ID，value：订阅了哪些topic
+     * @return key：消费者成员ID，value：可以消费的partition
+     */
     @Override
     public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
                                                     Map<String, Subscription> subscriptions) {
+        //获取topic被哪些consumer订阅了
         Map<String, List<MemberInfo>> consumersPerTopic = consumersPerTopic(subscriptions);
 
         Map<String, List<TopicPartition>> assignment = new HashMap<>();
@@ -94,22 +107,33 @@ public class RangeAssignor extends AbstractPartitionAssignor {
             assignment.put(memberId, new ArrayList<>());
 
         for (Map.Entry<String, List<MemberInfo>> topicEntry : consumersPerTopic.entrySet()) {
-            String topic = topicEntry.getKey();
-            List<MemberInfo> consumersForTopic = topicEntry.getValue();
-
+            String topic = topicEntry.getKey(); //topic
+            List<MemberInfo> consumersForTopic = topicEntry.getValue(); //订阅topic的消费者成员
+            //根据topic获取分区数量
             Integer numPartitionsForTopic = partitionsPerTopic.get(topic);
             if (numPartitionsForTopic == null)
                 continue;
 
             Collections.sort(consumersForTopic);
-
+            //平均每个消费者可以消费的分区,比如分区数量是3，消费者成员数量是2，则每个消费者可消费到1个partition
             int numPartitionsPerConsumer = numPartitionsForTopic / consumersForTopic.size();
+
+            //消费者多余的消费分区，比如分区数量是3，消费者成员数量是2，则多出一个分区
             int consumersWithExtraPartition = numPartitionsForTopic % consumersForTopic.size();
 
+            //封装topic partition信息
             List<TopicPartition> partitions = AbstractPartitionAssignor.partitions(topic, numPartitionsForTopic);
             for (int i = 0, n = consumersForTopic.size(); i < n; i++) {
+                //假设分区数量是3，消费者成员数量是2
+                //first sub: start=0, length = 1 + (0 + 1 > 1 ? 0 : 1) = 1, sub(0,2) , partitions= 0,1
+                //second sub: start=1, length = 1 + (1 + 1 > 1 ? 0 : 1) = 2, sub(2,3) , partitions= 2
+
+                //假设分区数量是5，消费者成员数量是2
+                //start = 2*0+0=0, length = 2 + (1 > 1 ? 0 : 1)=3, sub(0,3), partitions= 0,1,2
+                //start = 2*1+1, length = 2 + 0, sub(3,5), partitions=3,4
                 int start = numPartitionsPerConsumer * i + Math.min(i, consumersWithExtraPartition);
                 int length = numPartitionsPerConsumer + (i + 1 > consumersWithExtraPartition ? 0 : 1);
+                //消费者可以消费的partition
                 assignment.get(consumersForTopic.get(i).memberId).addAll(partitions.subList(start, start + length));
             }
         }

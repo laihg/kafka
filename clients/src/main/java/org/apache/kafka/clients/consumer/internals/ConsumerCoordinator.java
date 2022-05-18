@@ -355,6 +355,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         if (!isLeader)
             assignmentSnapshot = null;
 
+        //获取consumer partition分配策略
         ConsumerPartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
@@ -365,16 +366,19 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         Set<TopicPartition> ownedPartitions = new HashSet<>(subscriptions.assignedPartitions());
 
         // should at least encode the short version
-        if (assignmentBuffer.remaining() < 2)
+        if (assignmentBuffer.remaining() < 2) //格式不符合要求
             throw new IllegalStateException("There are insufficient bytes available to read assignment from the sync-group response (" +
                 "actual byte size " + assignmentBuffer.remaining() + ") , this is not expected; " +
                 "it is possible that the leader's assign function is buggy and did not return any assignment for this member, " +
                 "or because static member is configured and the protocol is buggy hence did not get the assignment for this member");
 
+        //将应消费得分区数据进行反序列化
         Assignment assignment = ConsumerProtocol.deserializeAssignment(assignmentBuffer);
 
+        //进行数据拷贝，不直接进行操作
         Set<TopicPartition> assignedPartitions = new HashSet<>(assignment.partitions());
 
+        //如果分配的topic是否与订阅的topic不一致，则使用当前订阅的topic再次发起加入组请求。
         if (!subscriptions.checkAssignmentMatchedSubscription(assignedPartitions)) {
             log.warn("We received an assignment {} that doesn't match our current subscription {}; it is likely " +
                 "that the subscription has changed since we joined the group. Will try re-join the group with current subscription",
@@ -387,6 +391,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         final AtomicReference<Exception> firstException = new AtomicReference<>(null);
         Set<TopicPartition> addedPartitions = new HashSet<>(assignedPartitions);
+        //将之前分配的分区移除调
         addedPartitions.removeAll(ownedPartitions);
 
         if (protocol == RebalanceProtocol.COOPERATIVE) {
@@ -420,15 +425,19 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         // were not explicitly requested, so we update the joined subscription here.
         maybeUpdateJoinedSubscription(assignedPartitions);
 
+        //这种通过异常来进行逻辑处理的写法是第一次见
         // Catch any exception here to make sure we could complete the user callback.
         firstException.compareAndSet(null, invokeOnAssignment(assignor, assignment));
 
+        //如果启用了自动提交，则更新下一次自动提交的时间
         // Reschedule the auto commit starting from now
         if (autoCommitEnabled)
             this.nextAutoCommitTimer.updateAndReset(autoCommitIntervalMs);
 
+        //更新消费者订阅的partition
         subscriptions.assignFromSubscribed(assignedPartitions);
 
+        //调用partition分配之后的处理
         // Add partitions that were not previously owned but are now assigned
         firstException.compareAndSet(null, invokePartitionsAssigned(addedPartitions));
 
@@ -616,12 +625,16 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
                                                         List<JoinGroupResponseData.JoinGroupResponseMember> allSubscriptions) {
+        //获取consumer partition分配策略
         ConsumerPartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
         String assignorName = assignor.name();
 
+        //消费组中所有订阅的topic
         Set<String> allSubscribedTopics = new HashSet<>();
+
+        //每个consumer订阅的topic信息
         Map<String, Subscription> subscriptions = new HashMap<>();
 
         // collect all the owned partitions
@@ -635,6 +648,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             ownedPartitions.put(memberSubscription.memberId(), subscription.ownedPartitions());
         }
 
+        //在分配partition时，要确保consumer订阅的topic元数据都已经拉取成功
         // the leader will begin watching for changes to any of the topics the group is interested in,
         // which ensures that all metadata changes will eventually be seen
         updateGroupSubscription(allSubscribedTopics);
@@ -643,7 +657,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         log.debug("Performing assignment using strategy {} with subscriptions {}", assignorName, subscriptions);
 
-        Map<String, Assignment> assignments = assignor.assign(metadata.fetch(), new GroupSubscription(subscriptions)).groupAssignment();
+        //消费组中订阅的topic信息
+        GroupSubscription groupSubscription = new GroupSubscription(subscriptions);
+
+        //key：消费者ID，value：可以消费的partition
+        Map<String, Assignment> assignments = assignor.assign(metadata.fetch(), groupSubscription).groupAssignment();
 
         // skip the validation for built-in cooperative sticky assignor since we've considered
         // the "generation" of ownedPartition inside the assignor

@@ -25,6 +25,14 @@ case class ElectionResult(topicPartition: TopicPartition, leaderAndIsr: Option[L
 
 object Election {
 
+  /**
+   * leader 副本下线
+   * @param partition
+   * @param leaderAndIsrOpt
+   * @param uncleanLeaderElectionEnabled
+   * @param controllerContext
+   * @return
+   */
   private def leaderForOffline(partition: TopicPartition,
                                leaderAndIsrOpt: Option[LeaderAndIsr],
                                uncleanLeaderElectionEnabled: Boolean,
@@ -72,9 +80,13 @@ object Election {
   private def leaderForReassign(partition: TopicPartition,
                                 leaderAndIsr: LeaderAndIsr,
                                 controllerContext: ControllerContext): ElectionResult = {
+    //目标副本，partition所有的副本
     val targetReplicas = controllerContext.partitionFullReplicaAssignment(partition).targetReplicas
+    //存活的副本
     val liveReplicas = targetReplicas.filter(replica => controllerContext.isReplicaOnline(replica, partition))
+    //同步数据完成的副本列表
     val isr = leaderAndIsr.isr
+    //根据选举算法，根据目标副本查找既存在isr列表中也存在liveReplicas列表中的副本
     val leaderOpt = PartitionLeaderElectionAlgorithms.reassignPartitionLeaderElection(targetReplicas, isr, liveReplicas.toSet)
     val newLeaderAndIsrOpt = leaderOpt.map(leader => leaderAndIsr.newLeader(leader))
     ElectionResult(partition, newLeaderAndIsrOpt, targetReplicas)

@@ -113,9 +113,21 @@ public abstract class AbstractCoordinator implements Closeable {
     public static final int JOIN_GROUP_TIMEOUT_LAPSE = 5000;
 
     protected enum MemberState {
+        /**
+         * consumer还未加入消费组
+         */
         UNJOINED,             // the client is not part of a group
+        /**
+         * 客户端已发送加入群组请求，但未收到响应
+         */
         PREPARING_REBALANCE,  // the client has sent the join group request, but have not received response
+        /**
+         * 客户端已收到加入组响应，但尚未收到partition分配
+         */
         COMPLETING_REBALANCE, // the client has received join group response, but have not received assignment
+        /**
+         * 客户端可以正常使用，partition也已经分配完成
+         */
         STABLE;               // the client has joined and is sending heartbeats
 
         public boolean hasNotJoinedGroup() {
@@ -428,15 +440,18 @@ public abstract class AbstractCoordinator implements Closeable {
                 needsJoinPrepare = false;
                 onJoinPrepare(generation.generationId, generation.memberId);
             }
-
+            //加入消费组请求
             final RequestFuture<ByteBuffer> future = initiateJoinGroup();
+            //等待请求完成
             client.poll(future, timer);
+            //如果等待事件已到，仍旧没有完成则说明超时了。
             if (!future.isDone()) {
                 // we ran out of time
                 return false;
             }
 
             if (future.succeeded()) {
+                //加入消费组成功处理
                 Generation generationSnapshot;
                 MemberState stateSnapshot;
 
@@ -450,6 +465,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 }
 
                 if (!generationSnapshot.equals(Generation.NO_GENERATION) && stateSnapshot == MemberState.STABLE) {
+                    //消费者存在版本且状态为可用，则将返回的分区数据拷贝一份
                     // Duplicate the buffer in case `onJoinComplete` does not complete and needs to be retried.
                     ByteBuffer memberAssignment = future.value().duplicate();
 
@@ -508,6 +524,7 @@ public abstract class AbstractCoordinator implements Closeable {
         // rebalance in the call to poll below. This ensures that we do not mistakenly attempt
         // to rejoin before the pending rebalance has completed.
         if (joinFuture == null) {
+            //初始化状态为PREPARING_REBALANCE，如果在响应结果返回前，state发生变化，则说明可能已经离开组了。
             state = MemberState.PREPARING_REBALANCE;
             // a rebalance can be triggered consecutively if the previous one failed,
             // in this case we would not update the start time.
@@ -559,6 +576,7 @@ public abstract class AbstractCoordinator implements Closeable {
                         .setSessionTimeoutMs(this.rebalanceConfig.sessionTimeoutMs)
                         .setMemberId(this.generation.memberId)
                         .setGroupInstanceId(this.rebalanceConfig.groupInstanceId.orElse(null))
+                        //protocolType=consumer
                         .setProtocolType(protocolType())
                         .setProtocols(metadata())
                         .setRebalanceTimeoutMs(this.rebalanceConfig.rebalanceTimeoutMs)
@@ -592,6 +610,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     sensors.joinSensor.record(response.requestLatencyMs());
 
                     synchronized (AbstractCoordinator.this) {
+                        //加入组时，state初始值为PREPARING_REBALANCE
                         if (state != MemberState.PREPARING_REBALANCE) {
                             // if the consumer was woken up before a rebalance completes, we may have already left
                             // the group. In this case, we do not want to continue with the sync group.
@@ -602,7 +621,7 @@ public abstract class AbstractCoordinator implements Closeable {
                             // we only need to enable heartbeat thread whenever we transit to
                             // COMPLETING_REBALANCE state since we always transit from this state to STABLE
                             if (heartbeatThread != null)
-                                heartbeatThread.enable();
+                                heartbeatThread.enable(); //启用心跳线程
 
                             AbstractCoordinator.this.generation = new Generation(
                                 joinResponse.data().generationId(),
@@ -715,7 +734,7 @@ public abstract class AbstractCoordinator implements Closeable {
                         .setAssignment(Utils.toArray(assignment.getValue()))
                 );
             }
-
+            //发送同步组请求，并携带分配好的分区方案给 broker coordinator
             SyncGroupRequest.Builder requestBuilder =
                     new SyncGroupRequest.Builder(
                             new SyncGroupRequestData()
@@ -779,7 +798,9 @@ public abstract class AbstractCoordinator implements Closeable {
                                 lastRebalanceEndMs = time.milliseconds();
                                 sensors.successfulRebalanceSensor.record(lastRebalanceEndMs - lastRebalanceStartMs);
                                 lastRebalanceStartMs = -1L;
-
+                                /**
+                                 * 得到消费分区方案，并将消费者分配partition的数据放入到future中
+                                 */
                                 future.complete(ByteBuffer.wrap(syncResponse.data().assignment()));
                             }
                         } else {
@@ -792,6 +813,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     }
                 }
             } else {
+                //需要重新加入
                 requestRejoin();
 
                 if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
