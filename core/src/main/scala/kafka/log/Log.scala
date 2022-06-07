@@ -1963,11 +1963,20 @@ class Log(@volatile private var _dir: File,
       while (segmentEntry != null) {
         val segment = segmentEntry.getValue
         val nextSegmentEntry = segments.higherEntry(segmentEntry.getKey)
+        //nextSegment：下一个日志文件
+        //upperBoundOffset：如果下一个日志不为空则取文件的起始位移，为空则取当前日志文件的LEO位移
         val (nextSegment, upperBoundOffset, isLastSegmentAndEmpty) = if (nextSegmentEntry != null)
+          //如果有新的LogSegment(日志文件)
           (nextSegmentEntry.getValue, nextSegmentEntry.getValue.baseOffset, false)
-        else
+        else {
           (null, logEndOffset, segment.size == 0)
+        }
 
+        /**
+         * 按保留时间机制删除：
+         *  1. 下一个日志文件不为空: 如果高水位大于等于下一个日志文件的起始位移 && 已达到过期条件，删除当前日志文件。
+         *  2. 下一个日志文件为空: 如果高水位大于等于当前文件的LEO && 已达到过期条件 && 日志文件不为空，删除当前日志文件。
+         */
         if (highWatermark >= upperBoundOffset && predicate(segment, Option(nextSegment)) && !isLastSegmentAndEmpty) {
           deletable += segment
           segmentEntry = nextSegmentEntry
